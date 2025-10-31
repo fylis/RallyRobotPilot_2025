@@ -2,11 +2,52 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class CNNEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=5, stride=2),  # [1,128,128] → [16,62,62]
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2), # → [32,30,30]
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2), # → [64,14,14]
+            nn.ReLU(),
+            nn.Flatten(),                               # → [64×14×14]
+        )
+        self.output_dim = 64 * 14 * 14
+
+    def forward(self, x):  # x: [batch, 1, 128, 128]
+        return self.conv(x)  # → [batch, output_dim]
+
+class RNNDecoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim=128, output_dim=5):
+        super().__init__()
+        self.rnn = nn.GRU(input_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):  # x: [batch, seq_len, input_dim]
+        _, h = self.rnn(x)  # h: [1, batch, hidden_dim]
+        return self.fc(h.squeeze(0))  # → [batch, 5]
+
+class RallyAutopilot(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = CNNEncoder()
+        self.decoder = RNNDecoder(input_dim=self.encoder.output_dim)
+
+    def forward(self, x):  # x: [batch, seq_len, 1, 128, 128]
+        batch, seq_len, _, _, _ = x.shape
+        x = x.view(batch * seq_len, 1, 128, 128)
+        features = self.encoder(x)  # → [batch * seq_len, feat_dim]
+        features = features.view(batch, seq_len, -1)
+        return self.decoder(features)  # → [batch, 5]
+
+
 class myCNN(nn.Module):
     def __init__(self, dropout_p=0.3):
         super().__init__()
         self.model = nn.Sequential([
-            nn.Conv2d(in_channels=2, out_channels=32, kernel_size=5, stride=2, padding=2),
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm2d(32),
 
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
