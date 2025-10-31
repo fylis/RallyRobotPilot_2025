@@ -9,27 +9,26 @@ from torch.optim.lr_scheduler import StepLR
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.data import DataLoader, Subset, SequentialSampler
 
-from model import myCNN, myDriver
+from model import RallyAutopilot
 from datasets import CustomDataset
 
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 NUM_EPOCHS = 100
 MIN_DELTA = 1e-4
 PATIENCE = 10
 SAVE_CHECKPOINT_DIR = "checkpoints"
+DATA_FILE = "data/data.parquet"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_road = myCNN().to(device)
-model_driver = myDriver().to(device)
+model = RallyAutopilot().to(device)
 
-params = itertools.chain(model_road.parameters(), model_driver.parameters())
-optimizer = optim.Adam(params, lr=0.001, weight_decay=1e-5)
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 scheduler = StepLR(optimizer, step_size=10, gamma=0.5)
 
 scaler = GradScaler()  # for mixed precision
 
-full_ds = CustomDataset('myparquet data')
+full_ds = CustomDataset(DATA_FILE, 5)
 
 train_len = int(0.8 * len(full_ds))
 train_ds = Subset(full_ds, range(0, train_len))
@@ -60,29 +59,24 @@ def loss(true_outputs, pred_outputs):
 def save_checkpoint(state, fname):
     torch.save(state, fname)
 
-def load_checkpoint(fname, model1, model2, optimizer=optimizer, scheduler=scheduler):
+def load_checkpoint(fname, model_load, optimizer=optimizer, scheduler=scheduler):
     ckpt = torch.load(fname, map_location=device)
-    model1.load_state_dict(ckpt["model1_state"])
-    model2.load_state_dict(ckpt["model2_state"])
+    model_load.load_state_dict(ckpt["model_state"])
     if optimizer and "optim_state" in ckpt:
         optimizer.load_state_dict(ckpt["optim_state"])
     if scheduler and "sched_state" in ckpt:
         scheduler.load_state_dict(ckpt["sched_state"])
     return ckpt.get("epoch", -1), ckpt.get("best_val", None)
 
-val_func = nn.MSELoss()
-
-def validate(model1, model2, loader, device = device):
-    model1.eval()
-    model2.eval()
+def validate(model_val, loader, device = device):
+    model_val.eval()
     ys, preds = [], []
     with torch.no_grad():
         for xb, yb in loader:
             xb, yb = xb.to(device), yb.to(device)
-            feat = model1(xb)
-            out = model2(feat)
-            preds.append(out.cpu().numpy())
-            ys.append(yb.cpu().numpy())
+            out = model_val(xb)
+            preds.append(out)
+            ys.append(yb)
     y_true = torch.cat(ys, axis=0)
     y_pred = torch.cat(preds, axis=0)
     return loss(y_true, y_pred)
@@ -93,8 +87,7 @@ no_improve = 0
 
 start_time = time.time()
 for epoch in range(NUM_EPOCHS):
-    model_road.train()
-    model_driver.train()
+    model.train()
     epoch_losses = []
     for xb, yb in train_loader:
         xb = xb.to(device, dtype=torch.float32)
@@ -103,19 +96,20 @@ for epoch in range(NUM_EPOCHS):
         optimizer.zero_grad()
 
         with autocast():
-            feat = model_road(xb)            # shape: (N, D)
-            outputs = model_driver(feat)         # shape: (N, out_dim)
+            B, S, C, H, W = xb.shape
+            outputs = model(xb)
             epoch_loss = loss(yb, outputs)
-        epoch_losses.append(torch.tensor(epoch_loss).to(device))
+        
+        epoch_losses.append(epoch_loss.detach())
 
-        scaler.scale(epoch_losses).backward()
+        scaler.scale(epoch_loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(itertools.chain(model_road.parameters(), model_driver.parameters()), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         scaler.step(optimizer)
         scaler.update()
 
-    train_loss = torch.mean(epoch_losses)
-    val_loss = validate(model_road,model_driver,val_loader)
+    train_loss = torch.mean(torch.Tensor(epoch_losses))
+    val_loss = validate(model,val_loader)
     if epoch % 10 == 0:
         elapsed = time.time() - start_time
         print(f"Epoch {epoch:03d} | train_loss {train_loss:.5f} | val_rmse {val_loss:.5f} | time {elapsed:.1f}s")
@@ -129,13 +123,12 @@ for epoch in range(NUM_EPOCHS):
         ckpt_path = Path(SAVE_CHECKPOINT_DIR) / f"best_epoch_{epoch:03d}.pt"
         save_checkpoint({
             "epoch": epoch,
-            "model1_state": model_road.state_dict(),
-            "model2_state": model_driver.state_dict(),
+            "model_state": model.state_dict(),
             "optim_state": optimizer.state_dict(),
             "sched_state": scheduler.state_dict(),
             "best_val": best_val
         }, str(ckpt_path))
-        print(f"  Saved best checkpoint to {ckpt_path}")
+        print(f"  Saved best checkpoint to {ckpt_path} {best_val}")
     else:
         no_improve += 1
 
