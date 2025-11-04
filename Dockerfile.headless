@@ -26,9 +26,11 @@ RUN apt-get update -y \
 # Rally part.
 WORKDIR /app
 RUN apt-get update && apt-get install -y git && apt-get clean
-# RUN git clone https://gitlab.hevs.ch/louis.lettry/rallyrobopilot.git .
-# RUN git checkout cedric
-COPY . .
+# Copy only the needed files
+COPY requirements.txt .
+COPY setup.py .
+COPY README.md .
+COPY rallyrobopilot ./rallyrobopilot
 
 RUN set -xe \
     && apt-get update \
@@ -43,4 +45,5 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 RUN pip install python3_xlib
 RUN pip install -e .
 
-CMD ["python", "scripts/main.py"]
+# Replaced by 'make run [script_path]''
+#CMD ["python", "scripts/main.py"]
