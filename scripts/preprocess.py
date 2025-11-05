@@ -3,9 +3,8 @@ import cv2
 import polars as pl
 import os
 
-DATA_DIR = 'data/'
+DATA_DIR = 'records/'
 DATA_SAVE = "data/data.parquet"
-ld_save = pl.LazyFrame()
 
 def preprocess_image(image, crop_top=0, crop_bottom=0, target_size=(128, 128)):
     # Optional cropping (e.g., remove top 50px and bottom 20px)
@@ -67,10 +66,20 @@ def save_to_parquet(X, y, path):
     df.write_parquet(path)
 
 def main():
-    for filename in os.listdir(DATA_DIR):
-        if not filename.endswith(".npy"):
+    ld_save = pl.LazyFrame()
+    files = os.listdir(DATA_DIR)
+    for filename in files:
+        if filename == 'images':
             continue
-
+        input_path = os.path.join(DATA_DIR, filename)
+        if not filename.endswith(".npy"):
+            if os.path.isdir(input_path):
+                print(filename)
+                fs = os.listdir(input_path)
+                for f in fs:
+                    files.append(os.path.join(filename,f))
+            continue
+        print(filename)
         input_path = os.path.join(DATA_DIR, filename)
 
         # Build list of records

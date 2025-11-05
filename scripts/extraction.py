@@ -3,18 +3,23 @@ import lzma
 import pickle
 import os
 
-RECORD_DIR = 'records/'
-SAVE_DIR = 'data/'
-IMAGE_DIR = 'data/images'
+RECORD_DIR = 'data/'
+SAVE_DIR = 'records/'
+IMAGE_DIR = 'records/images'
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-for filename in os.listdir(RECORD_DIR):
+files = os.listdir(RECORD_DIR)
+for filename in files:
+    input_path = os.path.join(RECORD_DIR, filename)
     if not filename.endswith(".npz"):
+        if os.path.isdir(input_path):
+            fs = os.listdir(input_path)
+            for f in fs:
+                files.append(os.path.join(filename,f))
         continue
 
-    input_path = os.path.join(RECORD_DIR, filename)
     try:
         with lzma.open(input_path, "rb") as f:
             snapshots = pickle.load(f)
@@ -22,11 +27,13 @@ for filename in os.listdir(RECORD_DIR):
         print(f"❌ Failed to load {filename}: {e}")
         continue
 
+    base, ext = os.path.splitext(filename)
     # Build list of records
     records = []
     for idx, s in enumerate(snapshots):
-        image_filename = f"{filename}_{idx}.npy"
+        image_filename = f"{base}_{idx}.npy"
         image_path = os.path.join(IMAGE_DIR, image_filename)
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
         np.save(image_path, s.image)
         record = {
             "forward": s.current_controls[0],
@@ -38,7 +45,8 @@ for filename in os.listdir(RECORD_DIR):
         }
         records.append(record)
     try:
-        record_path = os.path.join(SAVE_DIR, filename)
+        record_path = os.path.join(SAVE_DIR, base + ".npy")
+        os.makedirs(os.path.dirname(record_path), exist_ok=True)
         np.save(record_path, records)
         print(f"✅ Converted {filename} → {record_path}")
     except Exception as e:

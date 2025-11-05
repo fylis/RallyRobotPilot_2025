@@ -1,5 +1,6 @@
 # Dockerfile
-FROM debian:bookworm-slim
+#FROM debian:bookworm-slim
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 RUN apt-get -y update
 RUN apt install libgl1-mesa-glx -y
 RUN apt-get install 'ffmpeg'\

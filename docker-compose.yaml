@@ -18,6 +18,11 @@ services:
       context: .
       dockerfile: Dockerfile.headless
     image: 2025-rally-robot
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
     stdin_open: true                # Keep stdin open even if not attached
     tty: true                       # Allocate a pseudo-TTY
     ports:
