@@ -1,7 +1,12 @@
+import collections
 import torch
 import numpy as np
-from model import RallyAutopilot
+from model import CNNGRU
 from preprocess import preprocess_image
+
+SEQ_LEN = 5
+IMAGE_SIZE = (256,256)
+CKPT_FILE = 'checkpoints/model_epoch_17.pt'
 
 
 from PyQt6 import QtWidgets
@@ -19,53 +24,47 @@ Be warned that this could also cause crash on the client side if socket sending 
 /!\ Do not work directly in this file (make a copy and rename it) to prevent future pull from erasing what you write here.
 """
 
-CKPT_FILE = 'checkpoints/best_epoch_099.pt'
 
 class AutoPiloteNNMsgProcessor:
     def __init__(self):
         self.always_forward = True
-        self.model = RallyAutopilot()
-        ckpt = torch.load(CKPT_FILE)
-        self.model.load_state_dict(ckpt["model_state"])
-        self.images = []
-        self.frame_cnt = 0
+        self.model = CNNGRU()
+        states = torch.load(CKPT_FILE, map_location='cpu')
+        self.model.load_state_dict(states)
+        self.model.eval()  # IMPORTANT
+        self.images = collections.deque(maxlen=SEQ_LEN)  # use deque for speed
 
     def nn_infer(self, message):
-        #   Do smart NN inference here
-        print("new frame ", message.image.shape)
-        img = preprocess_image(message.image)
-        print("processed image ", img.shape)
+        commands = ["forward", "back", "left", "right"]
+        img = preprocess_image(message.image)  # (H, W) float32
+        img = torch.from_numpy(img).unsqueeze(0)  # (1, H, W)
         self.images.append(img)
 
-        if len(self.images) < 5:
-            print("Not ready < 5")
-            return [("forward", False)]
-        if len(self.images) > 5:
-            self.images.pop(0)
-        
-        features = np.stack(self.images[-5:])              # [5, 128, 128]
-        features = features[:, np.newaxis, :, :]           # [5, 1, 128, 128]
-        x_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)  # [1, 5, 1, 128, 128]
+        # Not enough frames?
+        if len(self.images) < SEQ_LEN:
+            print(f"Not yet sequence < {SEQ_LEN}")
+            return None
+
+        # Build sequence tensor
+        seq = torch.stack(list(self.images), dim=0)  # (SEQ_LEN, 1, H, W)
+        seq = seq.unsqueeze(0)  # (1, SEQ_LEN, 1, H, W)
+        print(seq.shape)
+
         with torch.no_grad():
-            print("Start prediction ", x_tensor.shape)
-            logits = self.model(x_tensor)[:4]
-            print(logits)
-            preds = (torch.sigmoid(logits) > 0.5).squeeze(0).numpy().astype(int)
+            logits = self.model(seq).squeeze(0)  # (4,)
+            preds = (torch.sigmoid(logits) > 0.5).cpu().numpy().astype(int)
+        preds[0] = np.random.randint(0,2)
         print(preds)
-        commands = ["forward", "back", "left", "right"]
-        return [(cmd, bool(pred)) for cmd, pred in zip(commands, preds)]
-
-
+        return list(zip(commands[:4], preds))
 
     def process_message(self, message, data_collector):
-        if self.frame_cnt == 10:
-            self.frame_cnt = 0
-            commands = self.nn_infer(message)
+        commands = self.nn_infer(message)
+        if commands is None:
+            return
+        for command, start in commands:
+            data_collector.onCarControlled(command, bool(start))
 
-            for command, start in commands:
-                data_collector.onCarControlled(command, start)
-        else:
-            self.frame_cnt += 1
+
 
 if  __name__ == "__main__":
     import sys
