@@ -1,4 +1,5 @@
 from rallyrobopilot import Car, Track, SunLight, MultiRaySensor
+from rallyrobopilot.checkpoint_renderer import CheckpointRenderer
 from ursina import *
 
 
@@ -7,7 +8,7 @@ def prepare_game_app(track_name = "SimpleTrack"):
     
     # Create Window
     window.vsync = True # Set to false to uncap FPS limit of 60
-    app = Ursina(size=(1280,1024))
+    app = Ursina(size=(640,512))
     print("Asset folder")
     print(application.asset_folder)
 
@@ -67,4 +68,9 @@ def prepare_game_app(track_name = "SimpleTrack"):
     track.activate()
     track.played = True
    
-    return app, car
+   
+    checkpoint_renderer = CheckpointRenderer(track_name=track_name)
+    checkpoint_renderer.set_car(car)
+    print("Checkpoint system initialized")
+   
+    return app, car, checkpoint_renderer
